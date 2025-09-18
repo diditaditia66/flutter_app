@@ -1,0 +1,19 @@
+# Flutter / Dart
+build/
+.dart_tool/
+.packages
+pubspec.lock
+
+# Android
+*.keystore
+android/app/google-services.json
+
+# iOS
+ios/Pods/
+
+# Env / sensitive
+.env
+
+# VSCode / macOS
+.vscode/
+.DS_Store

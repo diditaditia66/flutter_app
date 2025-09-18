@@ -1,0 +1,557 @@
+import 'package:flutter/material.dart';
+import 'package:file_picker/file_picker.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
+import 'dart:io';
+import 'api_config.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:http_parser/http_parser.dart'; // untuk MediaType
+
+void main() {
+  runApp(const TemperaturePredictionApp());
+}
+
+class TemperaturePredictionApp extends StatelessWidget {
+  const TemperaturePredictionApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'Temperature Prediction',
+      theme: ThemeData(
+        primarySwatch: Colors.blue,
+      ),
+      home: const MainMenuScreen(),
+    );
+  }
+}
+
+// ------------------ MainMenuScreen ------------------
+class MainMenuScreen extends StatelessWidget {
+  const MainMenuScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      
+      body: Container(
+        // Tambahkan background image
+        decoration: const BoxDecoration(
+          image: DecorationImage(
+            image: AssetImage('assets/images/background.png'),
+            fit: BoxFit.cover,
+          ),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              
+              const SizedBox(height: 300),
+              ElevatedButton(
+                onPressed: () {
+                  // Navigate to the 'Predict' screen
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (context) => const InputScreen()),
+                  );
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.black,
+                  foregroundColor: Colors.white,
+                ),
+                child: const Text('Predict'),
+              ),
+              const SizedBox(height: 20),
+              ElevatedButton(
+                onPressed: () {
+                  // Navigate to the 'Upload Previous Data' screen
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (context) => const UploadDataScreen()),
+                  );
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.black,
+                  foregroundColor: Colors.white,
+                ),
+                child: const Text('Upload Previous Data'),
+              ),
+              const SizedBox(height: 20),
+              ElevatedButton(
+                onPressed: () {
+                  // Navigate to the 'Retrain' screen
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (context) => const RetrainScreen()),
+                  );
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.black,
+                  foregroundColor: Colors.white,
+                ),
+                child: const Text('Retrain'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ------------------ UploadDataScreen ------------------
+class UploadDataScreen extends StatefulWidget {
+  const UploadDataScreen({super.key});
+
+  @override
+  _UploadDataScreenState createState() => _UploadDataScreenState();
+}
+
+class _UploadDataScreenState extends State<UploadDataScreen> {
+  PlatformFile? pickedFile;     // simpan sebagai PlatformFile (works for Web)
+  String? pickedName;
+
+  Future<void> pickFile() async {
+    final result = await FilePicker.platform.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: ['csv'],
+      withData: kIsWeb, // di Web kita butuh bytes
+    );
+    if (result != null && result.files.isNotEmpty) {
+      setState(() {
+        pickedFile = result.files.single;
+        pickedName = pickedFile!.name;
+      });
+    }
+  }
+
+  Future<void> uploadDataset() async {
+    if (pickedFile == null) return;
+
+    final baseUrl = const String.fromEnvironment(
+      'API_BASE_URL',
+      defaultValue: 'https://api.diditserver.my.id',
+    );
+    final uri = Uri.parse('$baseUrl/upload');
+
+    try {
+      final request = http.MultipartRequest('POST', uri);
+
+      // ❌ JANGAN set Content-Type manual, biarkan MultipartRequest yang atur
+
+      if (kIsWeb) {
+        if (pickedFile!.bytes == null) {
+          throw Exception('File bytes kosong. Coba pilih ulang file.');
+        }
+        request.files.add(
+          http.MultipartFile.fromBytes(
+            'file',
+            pickedFile!.bytes!,
+            filename: pickedFile!.name,                // wajib ada
+            contentType: MediaType('text', 'csv'),     // opsional
+          ),
+        );
+      } else {
+        final path = pickedFile!.path;
+        if (path == null) {
+          throw Exception('Path file tidak ditemukan.');
+        }
+        request.files.add(
+          await http.MultipartFile.fromPath('file', path),
+        );
+      }
+
+      final streamed = await request.send();
+      final resp = await http.Response.fromStream(streamed);
+
+      if (resp.statusCode == 200) {
+        if (!mounted) return;
+        showDialog(
+          context: context,
+          builder: (ctx) => const AlertDialog(
+            title: Text("Upload Success"),
+            content: Text("Dataset berhasil diupload."),
+          ),
+        );
+      } else {
+        throw Exception('Gagal upload. Status ${resp.statusCode}: ${resp.body}');
+      }
+    } catch (error) {
+      if (!mounted) return;
+      showDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text("Error"),
+          content: Text("Error: $error"),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text("OK"),
+            ),
+          ],
+        ),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: Container(
+        decoration: const BoxDecoration(
+          image: DecorationImage(
+            image: AssetImage('assets/images/background2.png'),
+            fit: BoxFit.cover,
+          ),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              const SizedBox(height: 300),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 16),
+                decoration: BoxDecoration(
+                  color: Colors.grey[300],
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(
+                  children: [
+                    OutlinedButton(
+                      onPressed: pickFile,
+                      style: OutlinedButton.styleFrom(
+                        side: const BorderSide(color: Colors.black, width: 1),
+                        backgroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+                      ),
+                      child: const Text('Choose File', style: TextStyle(color: Colors.black)),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        pickedName ?? 'No file chosen',
+                        style: const TextStyle(fontSize: 16, color: Colors.black),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 20),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: uploadDataset,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.black,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                  ),
+                  child: const Text('Upload'),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+
+// ------------------ RetrainScreen ------------------
+class RetrainScreen extends StatefulWidget {
+  const RetrainScreen({super.key});
+
+  @override
+  _RetrainScreenState createState() => _RetrainScreenState();
+}
+
+class _RetrainScreenState extends State<RetrainScreen> {
+  Future<void> retrainModel() async {
+    final uri = retrainUri; 
+
+    try {
+      final response = await http.post(
+        uri,
+        headers: {'Content-Type': 'application/json'},
+      );
+
+      if (response.statusCode == 200) {
+        showDialog(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: const Text("Retrain Success"),
+            content: const Text("Model has been retrained successfully."),
+            actions: [
+              TextButton(
+                onPressed: () {
+                  Navigator.of(ctx).pop();
+                },
+                child: const Text("OK"),
+              ),
+            ],
+          ),
+        );
+      } else {
+        throw Exception("Failed to retrain model. Please try again.");
+      }
+    } catch (error) {
+      showDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text("Error"),
+          content: Text("Error: $error"),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.of(ctx).pop();
+              },
+              child: const Text("OK"),
+            ),
+          ],
+        ),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      
+      body: Container(
+        // Tambahkan background image
+        decoration: const BoxDecoration(
+          image: DecorationImage(
+            image: AssetImage('assets/images/background.png'),
+            fit: BoxFit.cover,
+          ),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: Center(
+            child: ElevatedButton(
+              onPressed: retrainModel,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.black,
+                foregroundColor: Colors.white,
+              ),
+              child: const Text('Retrain Model'),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ------------------ InputScreen ------------------
+class InputScreen extends StatefulWidget {
+  const InputScreen({super.key});
+
+  @override
+  State<InputScreen> createState() => InputScreenState();
+}
+
+class InputScreenState extends State<InputScreen> {
+  final TextEditingController startDateController = TextEditingController();
+  final TextEditingController startTimeController = TextEditingController();
+  final TextEditingController predictionDateController = TextEditingController();
+  final TextEditingController predictionTimeController = TextEditingController();
+  final TextEditingController mwController = TextEditingController();
+  final TextEditingController mvarController = TextEditingController();
+
+  bool get isInputValid {
+    return startDateController.text.isNotEmpty &&
+        startTimeController.text.isNotEmpty &&
+        predictionDateController.text.isNotEmpty &&
+        predictionTimeController.text.isNotEmpty &&
+        mwController.text.isNotEmpty &&
+        mvarController.text.isNotEmpty;
+  }
+
+  // Function untuk memilih tanggal
+  Future<void> pickDate(TextEditingController controller) async {
+    final pickedDate = await showDatePicker(
+      context: context,
+      initialDate: DateTime.now(),
+      firstDate: DateTime(2000),
+      lastDate: DateTime(2100),
+    );
+
+    if (pickedDate != null) {
+      setState(() {
+        controller.text =
+            "${pickedDate.day.toString().padLeft(2, '0')}/${pickedDate.month.toString().padLeft(2, '0')}/${pickedDate.year}";
+      });
+    }
+  }
+
+  // Function untuk memilih waktu
+  Future<void> pickTime(TextEditingController controller) async {
+    final pickedTime = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay.now(),
+    );
+
+    if (pickedTime != null) {
+      final timeString =
+          "${pickedTime.hour.toString().padLeft(2, '0')}.${pickedTime.minute.toString().padLeft(2, '0')}";
+      setState(() {
+        controller.text = timeString;
+      });
+    }
+  }
+
+  // Function untuk mengirim request prediksi suhu
+  Future<void> predictTemperature() async {
+    if (!isInputValid) return;
+
+    final startDateTime = "${startDateController.text} ${startTimeController.text}";
+    final predictionDateTime = "${predictionDateController.text} ${predictionTimeController.text}";
+    final mw = double.tryParse(mwController.text) ?? 0;
+    final mvar = double.tryParse(mvarController.text) ?? 0;
+
+    final Map<String, dynamic> data = {
+      'start_time': startDateTime,
+      'current_time': predictionDateTime,
+      'MW': mw,
+      'Mvar': mvar,
+    };
+
+    final uri = predictUri;
+    try {
+      final response = await http.post(
+        uri,
+        body: json.encode(data),
+        headers: {'Content-Type': 'application/json'},
+      );
+
+      if (response.statusCode == 200) {
+        final responseData = json.decode(response.body);
+        final predictedTemperature = responseData['predicted_temperature'];
+
+        showDialog(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: const Text("Prediction Result"),
+            content: Text("Predicted Temperature: $predictedTemperature °C"),
+            actions: [
+              TextButton(
+                onPressed: () {
+                  Navigator.of(ctx).pop();
+                },
+                child: const Text("OK"),
+              ),
+            ],
+          ),
+        );
+      } else {
+        throw Exception("Failed to fetch prediction. Please try again.");
+      }
+    } catch (error) {
+      showDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text("Error"),
+          content: Text("Error: $error"),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.of(ctx).pop();
+              },
+              child: const Text("OK"),
+            ),
+          ],
+        ),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: Container(
+        constraints: const BoxConstraints.expand(),
+        decoration: const BoxDecoration(
+          image: DecorationImage(
+            image: AssetImage('assets/images/background2.png'),
+            fit: BoxFit.cover,
+          ),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const SizedBox(height: 200),
+
+                // DATE & TIME INPUT FOR START TIME
+                buildInputField("Start Date", startDateController, () => pickDate(startDateController)),
+                const SizedBox(height: 10),
+                buildInputField("Start Time", startTimeController, () => pickTime(startTimeController)),
+
+                const SizedBox(height: 20),
+
+                // DATE & TIME INPUT FOR PREDICTION TIME
+                buildInputField("Prediction Date", predictionDateController, () => pickDate(predictionDateController)),
+                const SizedBox(height: 10),
+                buildInputField("Prediction Time", predictionTimeController, () => pickTime(predictionTimeController)),
+
+                const SizedBox(height: 20),
+
+                // INPUT MW & MVAR
+                buildInputField("MW", mwController, null, isNumeric: true),
+                const SizedBox(height: 10),
+                buildInputField("MVAR", mvarController, null, isNumeric: true),
+
+                const SizedBox(height: 20),
+
+                // BUTTON PREDICT
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: isInputValid ? predictTemperature : null,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.black,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                    ),
+                    child: const Text('Predict Temperature'),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // Widget untuk input field
+  Widget buildInputField(String label, TextEditingController controller, VoidCallback? onTap, {bool isNumeric = false}) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+        decoration: BoxDecoration(
+          color: Colors.grey[300],
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: TextField(
+          controller: controller,
+          readOnly: onTap != null, // ReadOnly hanya untuk Date & Time Picker
+          keyboardType: isNumeric ? TextInputType.number : TextInputType.text,
+          decoration: InputDecoration.collapsed(hintText: label),
+        ),
+      ),
+    );
+  }
+}
+
